@@ -1,0 +1,46 @@
+#!/bin/sh
+case $1 in
+    bound)
+        echo "=== udhcpc: 获取到 IP ==="
+        echo "IP: $ip"
+        echo "子网掩码: $subnet"
+        echo "网关: $router"
+        echo "DNS: $dns"
+
+        # 配置 IP
+        ifconfig $interface $ip netmask $subnet up
+
+        # 删除旧的默认路由，添加新网关
+        route del default 2>/dev/null
+        route add default gw $router dev $interface
+
+        # 配置 DNS
+        echo "nameserver $dns" > /etc/resolv.conf
+        echo "nameserver 1.2.4.8" >> /etc/resolv.conf
+        echo "nameserver 114.114.114.114" >> /etc/resolv.conf
+        echo "nameserver 223.5.5.5" >> /etc/resolv.conf
+
+        # 开启 IP 转发
+        echo 1 > /proc/sys/net/ipv4/ip_forward
+        echo 0 > /proc/sys/net/ipv4/conf/all/rp_filter
+
+        # 配置 NAT（如果还没配置）
+        if ! iptables -t nat -L -v -n | grep -q "MASQUERADE.*eth0.1"; then
+            iptables -t nat -F
+            iptables -F
+            iptables -t nat -A POSTROUTING -o eth0.1 -j MASQUERADE
+            iptables -P FORWARD ACCEPT
+            iptables -A FORWARD -i br0 -o eth0.1 -j ACCEPT
+            iptables -A FORWARD -i eth0.1 -o br0 -j ACCEPT
+            if [ -f /usr/sbin/ip6tables ]; then
+                ip6tables -F
+                ip6tables -P FORWARD ACCEPT
+                ip6tables -A FORWARD -i br0 -o eth0.1 -j ACCEPT
+                ip6tables -A FORWARD -i eth0.1 -o br0 -j ACCEPT
+            fi
+        fi
+
+        echo "✅ DHCP 配置完成！"
+        echo "📌 WAN IP: $ip"
+        ;;
+esac
